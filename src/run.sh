@@ -111,7 +111,7 @@ else
     echo "Erro durante a conversão." >&2
     exit 1
 fi
-
+ 
 if [[ -s "$OUTPUT" ]]; then
     SIZE=$(stat -c '%s' "$OUTPUT")
     echo "Arquivo de saída: $OUTPUT ($SIZE bytes)"
