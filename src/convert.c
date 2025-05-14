@@ -31,18 +31,18 @@ Resampling (SwrContext):
 */
 
 //contextos globais de input/output, decoder/encoder e resampler
-static AVFormatContext *input_format_context = NULL;
+static AVFormatContext *input_format_context  = NULL;
 static AVFormatContext *output_format_context = NULL;
 static AVCodecContext  *decoder_context       = NULL;
 static AVCodecContext  *encoder_context       = NULL;
 static SwrContext      *resampler_context     = NULL;
 
 //estruturas de dados para áudio
-static AVFrame  *decoded_frame          = NULL;
-static AVPacket *packet                 = NULL;
-static int      audio_stream_index      = -1;
-static int16_t *resampled_buffer        = NULL;
-static int      resampled_sample_count  = 0;
+static AVFrame  *decoded_frame         = NULL;
+static AVPacket *packet                = NULL;
+static int      audio_stream_index     = -1;
+static int16_t *resampled_buffer       = NULL;
+static int      resampled_sample_count = 0;
 
 //variáveis de medição de performance
 static long   accumulated_filter_time_nsec = 0;
@@ -67,7 +67,7 @@ int open_input(const char *filename) {
     if (audio_stream_index < 0) return -1;
 
     //prepara decoder de áudio
-    AVCodec *decoder = avcodec_find_decoder(
+    const AVCodec *decoder = avcodec_find_decoder(
         input_format_context->streams[audio_stream_index]->codecpar->codec_id
     );
     if (!decoder) return -1;
@@ -85,6 +85,8 @@ int open_input(const char *filename) {
     packet       = av_packet_alloc();
 
     //inicializa resampler para converter para S16 stereo
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     resampler_context = swr_alloc_set_opts(
         NULL,
         AV_CH_LAYOUT_STEREO,           //saída: stereo intercalado
@@ -95,6 +97,7 @@ int open_input(const char *filename) {
         decoder_context->sample_rate,
         0, NULL
     );
+    #pragma GCC diagnostic pop
     swr_init(resampler_context);
     return 0;
 }
@@ -104,12 +107,15 @@ int open_output(const char *filename) {
     avformat_alloc_output_context2(&output_format_context, NULL, NULL, filename);
 
     //configura encoder MP3 e adiciona stream ao container
-    AVCodec *encoder           = avcodec_find_encoder(AV_CODEC_ID_MP3);
-    AVStream *output_stream    = avformat_new_stream(output_format_context, encoder);
-    encoder_context            = avcodec_alloc_context3(encoder);
-    encoder_context->sample_rate    = decoder_context->sample_rate;
+    const AVCodec *encoder        = avcodec_find_encoder(AV_CODEC_ID_MP3);
+    AVStream *output_stream       = avformat_new_stream(output_format_context, encoder);
+    encoder_context               = avcodec_alloc_context3(encoder);
+    encoder_context->sample_rate  = decoder_context->sample_rate;
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     encoder_context->channel_layout = AV_CH_LAYOUT_STEREO;
     encoder_context->channels       = 2;
+    #pragma GCC diagnostic pop
     encoder_context->sample_fmt     = AV_SAMPLE_FMT_S16;
     encoder_context->bit_rate       = 128000;
 
@@ -123,7 +129,8 @@ int open_output(const char *filename) {
     if (!(output_format_context->oformat->flags & AVFMT_NOFILE)) {
         avio_open(&output_format_context->pb, filename, AVIO_FLAG_WRITE);
     }
-    avformat_write_header(output_format_context, NULL);
+    int err = avformat_write_header(output_format_context, NULL);
+    (void)err;
     return 0;
 }
 
@@ -178,7 +185,10 @@ int encode_frame(void) {
     AVFrame *output_frame = av_frame_alloc();
     output_frame->nb_samples    = resampled_sample_count;
     output_frame->format        = AV_SAMPLE_FMT_S16;
-    output_frame->channel_layout= AV_CH_LAYOUT_STEREO;
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    output_frame->channel_layout = AV_CH_LAYOUT_STEREO;
+    #pragma GCC diagnostic pop
     output_frame->sample_rate   = decoder_context->sample_rate;
     av_frame_get_buffer(output_frame, 0);
     memcpy(
