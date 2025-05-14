@@ -203,3 +203,21 @@ int encode_frame(void) {
     return ret >= 0;
 }
 
+void finalize_output(void) {
+    //escreve trailer e fecha container de saída
+    av_write_trailer(output_format_context);
+    if (!(output_format_context->oformat->flags & AVFMT_NOFILE)) {
+        avio_close(output_format_context->pb);
+    }
+    //libera contexts de encoder e decoder
+    avcodec_free_context(&encoder_context);
+    avcodec_free_context(&decoder_context);
+    //libera frames, packet e resampler
+    av_frame_free(&decoded_frame);
+    av_packet_free(&packet);
+    swr_free(&resampler_context);
+    //libera contexts de input e output
+    avformat_free_context(output_format_context);
+    avformat_close_input(&input_format_context);
+}
+
