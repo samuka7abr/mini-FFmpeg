@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdio.h>  // para fprintf
 
 /*
 PARA MELHOR LEITURA E COMPREENSÃO DO CÓDIGO:
@@ -89,9 +90,9 @@ int open_input(const char *filename) {
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     resampler_context = swr_alloc_set_opts(
         NULL,
-        AV_CH_LAYOUT_STEREO,           //saída: stereo intercalado
-        AV_SAMPLE_FMT_S16,             //saída: PCM 16-bit intercalado
-        decoder_context->sample_rate,  //mesmo sample rate do input
+        AV_CH_LAYOUT_STEREO,
+        AV_SAMPLE_FMT_S16,
+        decoder_context->sample_rate,
         decoder_context->channel_layout,
         decoder_context->sample_fmt,
         decoder_context->sample_rate,
@@ -103,24 +104,29 @@ int open_input(const char *filename) {
 }
 
 int open_output(const char *filename) {
-    //cria container de output deduzindo formato por extensão (.mp3)
-    avformat_alloc_output_context2(&output_format_context, NULL, NULL, filename);
+    //cria container de output forçando formato MP3
+    int ret = avformat_alloc_output_context2(&output_format_context, NULL, "mp3", filename);
+    if (ret < 0 || !output_format_context) {
+        fprintf(stderr, "Erro ao criar output context para MP3.\n");
+        return ret;
+    }
 
     //configura encoder MP3 e adiciona stream ao container
-    const AVCodec *encoder        = avcodec_find_encoder(AV_CODEC_ID_MP3);
-    AVStream *output_stream       = avformat_new_stream(output_format_context, encoder);
-    encoder_context               = avcodec_alloc_context3(encoder);
-    encoder_context->sample_rate  = decoder_context->sample_rate;
+    const AVCodec *encoder  = avcodec_find_encoder(AV_CODEC_ID_MP3);
+    AVStream *output_stream = avformat_new_stream(output_format_context, encoder);
+    encoder_context         = avcodec_alloc_context3(encoder);
+    encoder_context->sample_rate = decoder_context->sample_rate;
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     encoder_context->channel_layout = AV_CH_LAYOUT_STEREO;
     encoder_context->channels       = 2;
     #pragma GCC diagnostic pop
-    //usar formato planar que LAME suporta
-    encoder_context->sample_fmt     = AV_SAMPLE_FMT_S16P;
-    encoder_context->bit_rate       = 128000;
+    //usar formato planar compatível com LAME
+    encoder_context->sample_fmt = AV_SAMPLE_FMT_S16P;
+    encoder_context->bit_rate   = 128000;
 
-    avcodec_open2(encoder_context, encoder, NULL);
+    ret = avcodec_open2(encoder_context, encoder, NULL);
+    if (ret < 0) return ret;
     avcodec_parameters_from_context(
         output_stream->codecpar,
         encoder_context
@@ -184,13 +190,13 @@ int decode_frame(void) {
 int encode_frame(void) {
     //prepara frame de saída planar a partir do buffer intercalado
     AVFrame *output_frame = av_frame_alloc();
-    output_frame->nb_samples    = resampled_sample_count;
-    output_frame->format        = AV_SAMPLE_FMT_S16P;
+    output_frame->nb_samples = resampled_sample_count;
+    output_frame->format     = AV_SAMPLE_FMT_S16P;
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     output_frame->channel_layout = AV_CH_LAYOUT_STEREO;
     #pragma GCC diagnostic pop
-    output_frame->sample_rate   = decoder_context->sample_rate;
+    output_frame->sample_rate = decoder_context->sample_rate;
     av_frame_get_buffer(output_frame, 0);
 
     //divide buffer intercalado em canais planos
