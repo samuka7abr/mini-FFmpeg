@@ -9,6 +9,6 @@ gcc -std=gnu11 -D_POSIX_C_SOURCE=199309L \
     $(pkg-config --cflags --libs libavformat libavcodec libswresample libavutil)
 
 INPUT="${1:-../videos/entrada.mp4}"
-OUTPUT="${2:-saida.mp3}"
+OUTPUT="${2:-../audios/saida.mp3}"
 
 ./test_convert "$INPUT" "$OUTPUT"
