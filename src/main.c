@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 199309L
 #include "convert.h"
-#include "filters.h"
+#include "filters/filters.h"
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
