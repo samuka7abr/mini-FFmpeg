@@ -84,13 +84,13 @@ int open_input(const char *filename) {
     decoded_frame = av_frame_alloc();
     packet       = av_packet_alloc();
 
-    //inicializa resampler para converter para S16 stereo
+    //inicializa resampler para converter para S16 intercalado
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     resampler_context = swr_alloc_set_opts(
         NULL,
         AV_CH_LAYOUT_STEREO,           //saída: stereo intercalado
-        AV_SAMPLE_FMT_S16,             //saída: PCM 16-bit
+        AV_SAMPLE_FMT_S16,             //saída: PCM 16-bit intercalado
         decoder_context->sample_rate,  //mesmo sample rate do input
         decoder_context->channel_layout,
         decoder_context->sample_fmt,
@@ -116,7 +116,8 @@ int open_output(const char *filename) {
     encoder_context->channel_layout = AV_CH_LAYOUT_STEREO;
     encoder_context->channels       = 2;
     #pragma GCC diagnostic pop
-    encoder_context->sample_fmt     = AV_SAMPLE_FMT_S16;
+    //usar formato planar que LAME suporta
+    encoder_context->sample_fmt     = AV_SAMPLE_FMT_S16P;
     encoder_context->bit_rate       = 128000;
 
     avcodec_open2(encoder_context, encoder, NULL);
@@ -181,21 +182,24 @@ int decode_frame(void) {
 }
 
 int encode_frame(void) {
-    //prepara frame de saída com samples já filtrados
+    //prepara frame de saída planar a partir do buffer intercalado
     AVFrame *output_frame = av_frame_alloc();
     output_frame->nb_samples    = resampled_sample_count;
-    output_frame->format        = AV_SAMPLE_FMT_S16;
+    output_frame->format        = AV_SAMPLE_FMT_S16P;
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     output_frame->channel_layout = AV_CH_LAYOUT_STEREO;
     #pragma GCC diagnostic pop
     output_frame->sample_rate   = decoder_context->sample_rate;
     av_frame_get_buffer(output_frame, 0);
-    memcpy(
-        output_frame->data[0],
-        resampled_buffer,
-        resampled_sample_count * 2 * sizeof(int16_t)
-    );
+
+    //divide buffer intercalado em canais planos
+    int16_t *chan0 = (int16_t*)output_frame->data[0];
+    int16_t *chan1 = (int16_t*)output_frame->data[1];
+    for (int i = 0; i < resampled_sample_count; i++) {
+        chan0[i] = resampled_buffer[2*i];
+        chan1[i] = resampled_buffer[2*i + 1];
+    }
 
     //mede tempo de codificação
     struct timespec t_start, t_end;
