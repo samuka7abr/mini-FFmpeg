@@ -12,7 +12,10 @@ void apply_volume_c(int16_t *buffer, int sample_count, float volume) {
         buffer[i] = (int16_t)tmp;
     }
 }
-//para teste
+
+#ifndef USE_ASM
+// stub usado quando não há versão em Assembly
 void apply_volume_asm(int16_t *buffer, int sample_count, float volume) {
     apply_volume_c(buffer, sample_count, volume);
 }
+#endif
