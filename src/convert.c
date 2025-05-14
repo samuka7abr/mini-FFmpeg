@@ -173,3 +173,33 @@ int decode_frame(void) {
     return 0; //sem mais frames
 }
 
+int encode_frame(void) {
+    //prepara frame de saída com samples já filtrados
+    AVFrame *output_frame = av_frame_alloc();
+    output_frame->nb_samples    = resampled_sample_count;
+    output_frame->format        = AV_SAMPLE_FMT_S16;
+    output_frame->channel_layout= AV_CH_LAYOUT_STEREO;
+    output_frame->sample_rate   = decoder_context->sample_rate;
+    av_frame_get_buffer(output_frame, 0);
+    memcpy(
+        output_frame->data[0],
+        resampled_buffer,
+        resampled_sample_count * 2 * sizeof(int16_t)
+    );
+
+    //mede tempo de codificação
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+    avcodec_send_frame(encoder_context, output_frame);
+    int ret = avcodec_receive_packet(encoder_context, packet);
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    //acumula tempo de codificação
+    accumulated_total_time_sec += diff_nsec(t_start, t_end) / 1e9;
+
+    //grava pacote codificado no container
+    av_write_frame(output_format_context, packet);
+    av_packet_unref(packet);
+    av_frame_free(&output_frame);
+    return ret >= 0;
+}
+
