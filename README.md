@@ -62,12 +62,12 @@ sudo apt-get install -y \
 2. **Execute o script de setup**
 
    ```bash
-   chmod +x build.sh
-   ./build.sh
+   chmod +x setup.sh
+   ./setup.sh
    ```
 
 3. **Adicione seu vídeo de entrada**
-   Copie o arquivo `entrada.mp4` (ou outro `.mp4`, `.webm` etc.) para:
+   Copie o arquivo `entrada.mp4` para:
 
    ```text
    mini-FFmpeg/
@@ -83,7 +83,7 @@ mini-FFmpeg/
 ├──dev_script
     ├── git-commit.sh ← script para automação de commits
     ├── remove.sh     ← script para remover executáveis
-├── build.sh          ← script de setup
+├── setup.sh          ← script de setup
 ├── videos/           ← coloque seus vídeos aqui
 ├── audios/           ← o MP3 gerado aparecerá aqui
 └── src/
