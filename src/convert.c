@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 #include "convert.h"
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -8,121 +9,121 @@
 #include <stdint.h>
 
 /*
-PARA MELHOR LEITURA E COMPREENSÃO DO C´ODIGO:
+PARA MELHOR LEITURA E COMPREENSÃO DO CÓDIGO:
+
 Conceitos:
-    containers: invólucro do arquivo de mídia (mp4, mkv, mp3)
-                organiza streams (fluxos) de dados (vídeo, audio, legendas)
+  - Container: invólucro do arquivo de mídia (mp4, mkv, mp3), organizando streams (vídeo, áudio, legendas).
+  - Stream: cada fluxo dentro do container. Aqui usamos apenas o stream de áudio (audio_stream_index).
+  - Codec: algoritmo de compressão/descompressão. codecpar define o tipo (AAC, MP3, etc.), usado para decodificar em PCM "cru".
 
-    stream: cada fluxo dentro desse container. no caso dessa aplicação,
-            apenas o stream de áudio está sendo usado (audio_stream_index)
-
-    codec: algorítmo de compressão/descompressão. Cada um dos streams possui
-            um codecpar (codec parameters) que diz qual tipo de codec usar
-            (AAC, MP3, VORBIS, etc) (quando usado no for da função open_input,
-            faz o papel de encontrar qual o melhor tipo de decode pra 
-            transformar o áudio comprimido em PCM "cru")
-
-Pacotes e Quadros (AVPacket e AVFrame):
-    AVPacket: contém dados compressos, exatamente como saíram do arquivo. 
-
-    AVFrame: resultado da descodificação: amostras PCM que representam a forma
-            de ondas de audio em valores inteiros ou float.
+Pacotes e Quadros:
+  - AVPacket: dados codificados (compressos) lidos do arquivo.
+  - AVFrame: dados decodificados em PCM (amostras de áudio).
 
 Samples, Sample Rate e Channel Layout:
-    Sample: cada ponto no tempo da forma de onda no áudio. no PCM 16bits (S16),
-            cada sample é um int16_t que diz o "quão alto" é o som naquele instante.
-    
-    Sample Rate: número de samples por segundo (ex: 44.1kHz = 44.100 samples/s). 
-                quanto maior, maior a fidelidade, mas mais dados.
-    
-    Channel Layout: determina a posição dos canais (mono, estereo, 5.1, etc) 
-                    AV_CH_LAYOUT_STEREO significa dois canais lado a lado
+  - Sample: cada ponto no tempo da forma de onda. No PCM S16, cada sample é um int16_t.
+  - Sample Rate: samples por segundo (ex.: 44100 Hz).
+  - Channel Layout: disposição dos canais (mono, stereo, 5.1). Usamos AV_CH_LAYOUT_STEREO.
 
-Resampling(SwrContext):
-    SrwContext: faz duas funções: 
-                                  converter o formato de sample
-                                  por ex: float,S16P -> S16 intercalado
-                                
-                                  converter Channel Layout
-                                  ou mudar a taxa de amostragem, se preciso
-                ele recebe o PCM bruto e converte para o buffer (resampled_buffer) pronto
-                para filtro ou encoder MP3    
+Resampling (SwrContext):
+  - Converte formato de amostra (ex.: float → S16) e layout de canais ou taxa de amostragem.
+  - Produz buffer (resampled_buffer) pronto para filtros ou encoder MP3.
 */
 
-//entrada e saída (mp4, mp3)
+//contextos globais de input/output, decoder/encoder e resampler
 static AVFormatContext *input_format_context = NULL;
 static AVFormatContext *output_format_context = NULL;
-//contextos para leitura de PCM e codificação de mp3
-static AVCodecContext *decoder_context = NULL;
-static AVCodecContext *encoder_context = NULL;
-//conversão de audio para formatos e canais
-static SwrContext *resampler_context = NULL;
-//tratamento de audio bruto
-static AVFrame *decoded_frame = NULL;
-static AVPacket *packet = NULL;
-static int audio_stream_index = -1;
-//contém os samples pós resample
-static int16_t *resampled_buffer = NULL;
-static int resampled_sample_count = 0;
-//variáveis de performance
-static long accumulated_filter_time_nsec = 0;
-static double accumulated_total_time_sec = 0;
+static AVCodecContext  *decoder_context       = NULL;
+static AVCodecContext  *encoder_context       = NULL;
+static SwrContext      *resampler_context     = NULL;
 
-int open_input(const char *filename){
-    //abre o container
+//estruturas de dados para áudio
+static AVFrame  *decoded_frame          = NULL;
+static AVPacket *packet                 = NULL;
+static int      audio_stream_index      = -1;
+static int16_t *resampled_buffer        = NULL;
+static int      resampled_sample_count  = 0;
+
+//variáveis de medição de performance
+static long   accumulated_filter_time_nsec = 0;
+static double accumulated_total_time_sec   = 0;
+
+int open_input(const char *filename) {
+    //abre o container de input
     int ret = avformat_open_input(&input_format_context, filename, NULL, NULL);
-    if(ret < 0) return ret;
-    
-    //carrega o arquivo lendo as infos de stream(video, audio, legendas, etc)
+    if (ret < 0) return ret;
+
+    //lê informações de streams (vídeo, áudio, legendas)
     ret = avformat_find_stream_info(input_format_context, NULL);
-    if(ret < 0) return ret;
-    
-    //percorre o formato de input até encontrar aquele cujo o tipo de codec == AVMEDIA_TYPE_AUDIO
-    for(int i = 0; i < input_format_context->nb_streams; i++){
-        if(input_format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO){
-            //guarda o index do codec i
+    if (ret < 0) return ret;
+
+    //encontra índice do stream de áudio
+    for (int i = 0; i < input_format_context->nb_streams; i++) {
+        if (input_format_context->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             audio_stream_index = i;
             break;
         }
     }
+    if (audio_stream_index < 0) return -1;
 
-    if(audio_stream_index < 0) return -1;
-
-    //atribui a decoder o decodificador mais adequado ao codec detectado
+    //prepara decoder de áudio
     AVCodec *decoder = avcodec_find_decoder(
-        input_format_context->streams[audio_stream_index]->codecpar->codec_id);
-    if(!decoder) return -1;
-    
-    //preenchimento de contexto com parâmetros da stream
+        input_format_context->streams[audio_stream_index]->codecpar->codec_id
+    );
+    if (!decoder) return -1;
+
     decoder_context = avcodec_alloc_context3(decoder);
     avcodec_parameters_to_context(
         decoder_context,
         input_format_context->streams[audio_stream_index]->codecpar
     );
-    
-    //abre o decoder pra uso
     ret = avcodec_open2(decoder_context, decoder, NULL);
-    if(ret < 0) return ret;
+    if (ret < 0) return ret;
 
-    //recebe PCM e lê pacotes, respectivamente
+    //aloca estruturas de decodificação
     decoded_frame = av_frame_alloc();
-    packet = av_packet_alloc();
+    packet       = av_packet_alloc();
 
-    resampler_context = swr_alloc_set_opts( //inicialida resampler definindo:
+    //inicializa resampler para converter para S16 stereo
+    resampler_context = swr_alloc_set_opts(
         NULL,
-        //formato de saída
-        AV_CH_LAYOUT_STEREO, //estéreo
-        AV_SAMPLE_FMT_S16, //16bits inteiros, taxa igual a do input
-
-        //formato de entrada extraído de decoder_context
-        decoder_context->sample_rate,
+        AV_CH_LAYOUT_STEREO,           //saída: stereo intercalado
+        AV_SAMPLE_FMT_S16,             //saída: PCM 16-bit
+        decoder_context->sample_rate,  //mesmo sample rate do input
         decoder_context->channel_layout,
         decoder_context->sample_fmt,
         decoder_context->sample_rate,
-        0,
-        NULL
+        0, NULL
     );
-
-    swr_init(resampler_context); //ativando resampler
+    swr_init(resampler_context);
     return 0;
 }
+
+int open_output(const char *filename) {
+    //cria container de output deduzindo formato por extensão (.mp3)
+    avformat_alloc_output_context2(&output_format_context, NULL, NULL, filename);
+
+    //configura encoder MP3 e adiciona stream ao container
+    AVCodec *encoder           = avcodec_find_encoder(AV_CODEC_ID_MP3);
+    AVStream *output_stream    = avformat_new_stream(output_format_context, encoder);
+    encoder_context            = avcodec_alloc_context3(encoder);
+    encoder_context->sample_rate    = decoder_context->sample_rate;
+    encoder_context->channel_layout = AV_CH_LAYOUT_STEREO;
+    encoder_context->channels       = 2;
+    encoder_context->sample_fmt     = AV_SAMPLE_FMT_S16;
+    encoder_context->bit_rate       = 128000;
+
+    avcodec_open2(encoder_context, encoder, NULL);
+    avcodec_parameters_from_context(
+        output_stream->codecpar,
+        encoder_context
+    );
+
+    //abre arquivo e escreve cabeçalho do container
+    if (!(output_format_context->oformat->flags & AVFMT_NOFILE)) {
+        avio_open(&output_format_context->pb, filename, AVIO_FLAG_WRITE);
+    }
+    avformat_write_header(output_format_context, NULL);
+    return 0;
+}
+
