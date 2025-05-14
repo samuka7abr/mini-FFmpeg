@@ -127,3 +127,49 @@ int open_output(const char *filename) {
     return 0;
 }
 
+int decode_frame(void) {
+    //lê pacotes até encontrar áudio
+    while (av_read_frame(input_format_context, packet) >= 0) {
+        if (packet->stream_index != audio_stream_index) {
+            av_packet_unref(packet);
+            continue;
+        }
+        //mede tempo de decodificação
+        struct timespec t_start, t_end;
+        clock_gettime(CLOCK_MONOTONIC, &t_start);
+        avcodec_send_packet(decoder_context, packet);
+        int ret = avcodec_receive_frame(decoder_context, decoded_frame);
+        clock_gettime(CLOCK_MONOTONIC, &t_end);
+        //acumula tempo de decodificação
+        accumulated_total_time_sec += diff_nsec(t_start, t_end) / 1e9;
+        av_packet_unref(packet);
+        if (ret < 0) continue;
+
+        //calcula quantidade de samples de saída após resample
+        int64_t delay = swr_get_delay(resampler_context, decoder_context->sample_rate);
+        int out_samples = av_rescale_rnd(
+            delay + decoded_frame->nb_samples,
+            decoder_context->sample_rate,
+            decoder_context->sample_rate,
+            AV_ROUND_UP
+        );
+        //aloca buffer para samples convertidos
+        av_samples_alloc((uint8_t**)&resampled_buffer,
+                         NULL,
+                         2,
+                         out_samples,
+                         AV_SAMPLE_FMT_S16,
+                         0);
+        //converte PCM para buffer de saída
+        resampled_sample_count = swr_convert(
+            resampler_context,
+            (uint8_t**)&resampled_buffer,
+            out_samples,
+            (const uint8_t**)decoded_frame->data,
+            decoded_frame->nb_samples
+        );
+        return 1; //buffer pronto para filtro
+    }
+    return 0; //sem mais frames
+}
+
