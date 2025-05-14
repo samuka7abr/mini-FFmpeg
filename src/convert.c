@@ -221,3 +221,33 @@ void finalize_output(void) {
     avformat_close_input(&input_format_context);
 }
 
+int16_t* get_buffer(void) {
+    //retorna ponteiro para buffer resampled pronto
+    return resampled_buffer;
+}
+
+int get_sample_count(void) {
+    //retorna número de samples (canais x amostras)
+    return resampled_sample_count * 2;
+}
+
+void add_filter_time(long nsec) {
+    //acumula tempo gasto dentro do filtro de volume
+    accumulated_filter_time_nsec += nsec;
+}
+
+double get_total_time(void) {
+    //retorna tempo total (decodificação + codificação)
+    return accumulated_total_time_sec;
+}
+
+double get_filter_time(void) {
+    //retorna tempo gasto apenas no filtro
+    return accumulated_filter_time_nsec / 1e9;
+}
+
+long diff_nsec(struct timespec start, struct timespec end) {
+    //calcula diferença em nanosegundos entre dois timespecs
+    return (end.tv_sec - start.tv_sec) * 1000000000L
+         + (end.tv_nsec - start.tv_nsec);
+}
